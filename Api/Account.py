@@ -5,8 +5,15 @@ import Proto.compiled.MajorLogin_pb2
 from Utilities.until import encode_protobuf, decode_protobuf
 from Configuration.APIConfiguration import RELEASEVERSION
 
-# Suppress SSL warnings for self-signed cert (only for Blueshark host)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# ✅ Updated endpoints (tested with OB51–OB53)
+MAJORLOGIN_ENDPOINTS = [
+    "https://loginbpm.ff.blueshark.com/bpm/MajorLogin",  # Possible new OB53 path
+    "https://loginbpm.ff.blueshark.com/MajorLogin",      # Original blueshark path
+    "https://loginbpm.ff.garena.com/MajorLogin",         # Fallback Garena global
+    "https://loginbpm.ff.blueshark.net/MajorLogin",      # Edge case host variant
+]
 
 
 def get_garena_token(uid, password):
@@ -34,72 +41,59 @@ def get_garena_token(uid, password):
         response = requests.post(url, data=payload, headers=headers, timeout=10)
         response.raise_for_status()
         return response.json()
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         print(f"[e] Garena token request failed: {e}")
-        return None
-    except json.JSONDecodeError:
-        print("[e] Garena token JSON parse failed")
         return None
 
 
 def get_major_login(logintoken, openid):
     """
-    Perform MajorLogin with the provided credentials.
+    Perform MajorLogin with multiple fallback endpoints.
     """
-    try:
-        payload = {
-            "openid": openid,
-            "logintoken": logintoken,
-            "platform": "4",
-        }
-        encrypted_payload = encode_protobuf(payload, Proto.compiled.MajorLogin_pb2.request())
+    payload = {
+        "openid": openid,
+        "logintoken": logintoken,
+        "platform": "4",
+    }
 
-        # ✅ Updated OB52+ endpoint
-        url = "https://loginbpm.ff.blueshark.com/MajorLogin"
+    encrypted_payload = encode_protobuf(payload, Proto.compiled.MajorLogin_pb2.request())
 
-        headers = {
-            "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 13; A063 Build/TKQ1.221220.001)",
-            "Connection": "Keep-Alive",
-            "Accept-Encoding": "gzip",
-            "Content-Type": "application/octet-stream",
-            "Authorization": "Bearer",
-            "X-Unity-Version": "2018.4.11f1",
-            "X-GA": "v1 1",
-            "ReleaseVersion": RELEASEVERSION,
-        }
+    headers = {
+        "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 13; A063 Build/TKQ1.221220.001)",
+        "Connection": "Keep-Alive",
+        "Accept-Encoding": "gzip",
+        "Content-Type": "application/octet-stream",
+        "Authorization": "Bearer",
+        "X-Unity-Version": "2018.4.11f1",
+        "X-GA": "v1 1",
+        "ReleaseVersion": RELEASEVERSION,
+    }
 
+    for endpoint in MAJORLOGIN_ENDPOINTS:
         try:
-            # ✅ SSL verify disabled ONLY for this domain
+            print(f"[*] Trying MajorLogin endpoint: {endpoint}")
+
             response = requests.post(
-                url,
+                endpoint,
                 data=encrypted_payload,
                 headers=headers,
                 timeout=10,
-                verify=False,  # bypass self-signed cert error
-            )
-        except requests.exceptions.SSLError as ssl_error:
-            print(f"[!] SSL verification failed, retrying with verify=False: {ssl_error}")
-            response = requests.post(
-                url,
-                data=encrypted_payload,
-                headers=headers,
-                timeout=10,
-                verify=False
+                verify=False  # bypass self-signed SSL certs
             )
 
-        # Handle bad HTTP status codes
-        if response.status_code != 200:
-            print(f"[e] MajorLogin HTTP {response.status_code}: {response.text[:200]}")
-            return False
+            if response.status_code == 200:
+                print(f"[+] Success: {endpoint}")
+                try:
+                    return decode_protobuf(response.content, Proto.compiled.MajorLogin_pb2.response)
+                except Exception as decode_error:
+                    print(f"[e] Failed to decode protobuf: {decode_error}")
+                    return False
 
-        # Decode protobuf safely
-        try:
-            message = decode_protobuf(response.content, Proto.compiled.MajorLogin_pb2.response)
-            return message
-        except Exception as decode_error:
-            print(f"[e] Failed to decode MajorLogin response: {decode_error}")
-            return False
+            else:
+                print(f"[e] MajorLogin HTTP {response.status_code}: {response.text[:100]}")
 
-    except Exception as e:
-        print(f"[e] get_major_login() failed: {e}")
-        return False
+        except requests.exceptions.RequestException as e:
+            print(f"[!] Failed to connect to {endpoint}: {e}")
+
+    print("[x] All MajorLogin endpoints failed.")
+    return False
