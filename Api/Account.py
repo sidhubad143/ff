@@ -7,21 +7,19 @@ from Configuration.APIConfiguration import RELEASEVERSION
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ✅ Updated endpoints (tested with OB51–OB53)
+# ✅ Expanded fallback list for OB53–OB54
 MAJORLOGIN_ENDPOINTS = [
-    "https://loginbpm.ff.blueshark.com/bpm/MajorLogin",  # Possible new OB53 path
-    "https://loginbpm.ff.blueshark.com/MajorLogin",      # Original blueshark path
-    "https://loginbpm.ff.garena.com/MajorLogin",         # Fallback Garena global
-    "https://loginbpm.ff.blueshark.net/MajorLogin",      # Edge case host variant
+    "https://loginbpm.ff.blueshark.com/api/MajorLogin",
+    "https://loginbpm.ff.blueshark.com/v2/MajorLogin",
+    "https://loginbpm.ff.blueshark.com/bpm/MajorLogin",
+    "https://loginbpm.ff.blueshark.com/MajorLogin",
+    "https://loginbpm.ff.gblueshark.com/MajorLogin",
+    "https://loginbpm.ff.blueshark.net/MajorLogin",
 ]
 
 
 def get_garena_token(uid, password):
-    """
-    Get Garena token using uid and password.
-    """
     url = "https://ffmconnect.live.gop.garenanow.com/oauth/guest/token/grant"
-
     payload = {
         "uid": uid,
         "password": password,
@@ -30,32 +28,26 @@ def get_garena_token(uid, password):
         "client_secret": "2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3",
         "client_id": "100067",
     }
-
     headers = {
         "User-Agent": "GarenaMSDK/4.0.19P9(A063; Android 13; en; IN;)",
         "Connection": "Keep-Alive",
         "Accept-Encoding": "gzip",
     }
-
     try:
-        response = requests.post(url, data=payload, headers=headers, timeout=10)
-        response.raise_for_status()
-        return response.json()
+        r = requests.post(url, data=payload, headers=headers, timeout=10)
+        r.raise_for_status()
+        return r.json()
     except Exception as e:
         print(f"[e] Garena token request failed: {e}")
         return None
 
 
 def get_major_login(logintoken, openid):
-    """
-    Perform MajorLogin with multiple fallback endpoints.
-    """
     payload = {
         "openid": openid,
         "logintoken": logintoken,
         "platform": "4",
     }
-
     encrypted_payload = encode_protobuf(payload, Proto.compiled.MajorLogin_pb2.request())
 
     headers = {
@@ -72,27 +64,19 @@ def get_major_login(logintoken, openid):
     for endpoint in MAJORLOGIN_ENDPOINTS:
         try:
             print(f"[*] Trying MajorLogin endpoint: {endpoint}")
+            r = requests.post(endpoint, data=encrypted_payload, headers=headers, timeout=10, verify=False)
 
-            response = requests.post(
-                endpoint,
-                data=encrypted_payload,
-                headers=headers,
-                timeout=10,
-                verify=False  # bypass self-signed SSL certs
-            )
-
-            if response.status_code == 200:
+            if r.status_code == 200:
                 print(f"[+] Success: {endpoint}")
                 try:
-                    return decode_protobuf(response.content, Proto.compiled.MajorLogin_pb2.response)
-                except Exception as decode_error:
-                    print(f"[e] Failed to decode protobuf: {decode_error}")
+                    return decode_protobuf(r.content, Proto.compiled.MajorLogin_pb2.response)
+                except Exception as e:
+                    print(f"[e] Protobuf decode failed: {e}")
                     return False
-
             else:
-                print(f"[e] MajorLogin HTTP {response.status_code}: {response.text[:100]}")
+                print(f"[e] MajorLogin HTTP {r.status_code}: {r.text[:150]}")
 
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             print(f"[!] Failed to connect to {endpoint}: {e}")
 
     print("[x] All MajorLogin endpoints failed.")
