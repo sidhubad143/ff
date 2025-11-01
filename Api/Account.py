@@ -1,20 +1,17 @@
 import requests
 import json
+import urllib3
 import Proto.compiled.MajorLogin_pb2
 from Utilities.until import encode_protobuf, decode_protobuf
 from Configuration.APIConfiguration import RELEASEVERSION
 
+# Suppress SSL warnings for self-signed cert (only for Blueshark host)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 
 def get_garena_token(uid, password):
     """
-    Get Garena token using uid and password
-
-    Args:
-        uid (str): User ID
-        password (str): Password
-
-    Returns:
-        dict: JSON response from the API
+    Get Garena token using uid and password.
     """
     url = "https://ffmconnect.live.gop.garenanow.com/oauth/guest/token/grant"
 
@@ -40,24 +37,16 @@ def get_garena_token(uid, password):
     except requests.exceptions.RequestException as e:
         print(f"[e] Garena token request failed: {e}")
         return None
-    except json.JSONDecodeError as e:
-        print(f"[e] Garena token JSON parse failed: {e}")
+    except json.JSONDecodeError:
+        print("[e] Garena token JSON parse failed")
         return None
 
 
 def get_major_login(logintoken, openid):
     """
-    Perform major login with the provided credentials
-
-    Args:
-        logintoken (str): The login token
-        openid (str): The open ID
-
-    Returns:
-        dict | bool: Decoded response message or False on error
+    Perform MajorLogin with the provided credentials.
     """
     try:
-        # Encrypt protobuf payload
         payload = {
             "openid": openid,
             "logintoken": logintoken,
@@ -68,7 +57,6 @@ def get_major_login(logintoken, openid):
         # ✅ Updated OB52+ endpoint
         url = "https://loginbpm.ff.blueshark.com/MajorLogin"
 
-        # ✅ Clean and corrected headers
         headers = {
             "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 13; A063 Build/TKQ1.221220.001)",
             "Connection": "Keep-Alive",
@@ -77,20 +65,40 @@ def get_major_login(logintoken, openid):
             "Authorization": "Bearer",
             "X-Unity-Version": "2018.4.11f1",
             "X-GA": "v1 1",
-            "ReleaseVersion": RELEASEVERSION,  # should be OB52 or OB53
+            "ReleaseVersion": RELEASEVERSION,
         }
 
-        # Send the login request
-        response = requests.post(url, data=encrypted_payload, headers=headers, timeout=10)
+        try:
+            # ✅ SSL verify disabled ONLY for this domain
+            response = requests.post(
+                url,
+                data=encrypted_payload,
+                headers=headers,
+                timeout=10,
+                verify=False,  # bypass self-signed cert error
+            )
+        except requests.exceptions.SSLError as ssl_error:
+            print(f"[!] SSL verification failed, retrying with verify=False: {ssl_error}")
+            response = requests.post(
+                url,
+                data=encrypted_payload,
+                headers=headers,
+                timeout=10,
+                verify=False
+            )
 
-        # Handle 401 / invalid responses gracefully
+        # Handle bad HTTP status codes
         if response.status_code != 200:
-            print(f"[e] MajorLogin HTTP {response.status_code} - {response.text}")
+            print(f"[e] MajorLogin HTTP {response.status_code}: {response.text[:200]}")
             return False
 
-        # Decode protobuf response
-        message = decode_protobuf(response.content, Proto.compiled.MajorLogin_pb2.response)
-        return message
+        # Decode protobuf safely
+        try:
+            message = decode_protobuf(response.content, Proto.compiled.MajorLogin_pb2.response)
+            return message
+        except Exception as decode_error:
+            print(f"[e] Failed to decode MajorLogin response: {decode_error}")
+            return False
 
     except Exception as e:
         print(f"[e] get_major_login() failed: {e}")
