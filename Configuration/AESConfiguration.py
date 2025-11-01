@@ -1,2 +1,2 @@
-MAIN_KEY = b'Yg&tc%DEuh6%Zc^8'
-MAIN_IV = b'6oyZDr22E3ychjM%'
+MAIN_KEY = b'R3d$7%yHq#P2t@v!'   
+MAIN_IV = b'FvT!9zP0q@b6w$3L'    
