@@ -66,7 +66,7 @@ def get_major_login(logintoken, openid):
         encrypted_payload = encode_protobuf(payload, Proto.compiled.MajorLogin_pb2.request())
 
         # ✅ Updated OB52+ endpoint
-        url = "https://loginbpm.ff.garena.com/MajorLogin"
+        url = "https://loginbpm.ff.blueshark.com/MajorLogin"
 
         # ✅ Clean and corrected headers
         headers = {
